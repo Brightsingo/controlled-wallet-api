@@ -1,82 +1,83 @@
+// server.js
+require('dotenv').config();
 const express = require('express');
-const { query } = require('./db');
+const path = require('path');
 
 const app = express();
-const port = process.env.PORT || 3000 ;
+const port = process.env.PORT || 3000;
 
+// Middleware
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-// Health check
-app.get('/db/health', async (req, res) => {
-  res.send('Database is RUNNING');
+// Request logging middleware
+app.use((req, res, next) => {
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
+  next();
 });
 
-// Spend from a session
-// app.post('/sessions/:id/spend', async (req, res) => {
-//   const { id } = req.params;
-//   const { amount, vendor } = req.body;
+// Import and use the main app
+const mainApp = require('./app');
+app.use('/', mainApp);
 
-//   const session = await query('SELECT allocated, spent, status FROM sessions WHERE id=$1', [id]);
-//   if (!session.rows.length) return res.status(404).json({ error: 'Session not found' });
+// 404 Handler - FIXED: Use proper 404 handling
+app.use((req, res) => {
+  res.status(404).json({
+    status: 'ERROR',
+    message: 'Route not found',
+    path: req.originalUrl,
+    timestamp: new Date().toISOString(),
+    suggestions: [
+      'Check the endpoint URL',
+      'Verify the HTTP method (GET, POST, etc.)',
+      'Available endpoints: GET /, POST /auth/login, POST /sessions, etc.'
+    ]
+  });
+});
 
-//   const { allocated, spent, status } = session.rows[0];
+// Error Handling Middleware
+app.use((error, req, res, next) => {
+  console.error('Server Error:', {
+    timestamp: new Date().toISOString(),
+    path: req.path,
+    method: req.method,
+    error: error.message,
+    stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+  });
 
-//   if (status === 'completed') {
-//     return res.status(403).json({ error: 'Session closed' });
-//   }
+  const statusCode = error.statusCode || 500;
+  const errorResponse = {
+    status: 'ERROR',
+    message: 'Internal server error',
+    timestamp: new Date().toISOString()
+  };
 
-//   if (parseFloat(spent) + amount > parseFloat(allocated)) {
-//     return res.status(400).json({ error: 'Overspend not allowed' });
-//   }
-
-//   // ✅ Only update session spent, not wallet balance
-//   await query('UPDATE sessions SET spent = spent + $1 WHERE id=$2', [amount, id]);
-//   await query('INSERT INTO transactions (session_id, amount, vendor) VALUES ($1, $2, $3)', [id, amount, vendor]);
-
-//   res.status(201).json({ message: 'Transaction recorded' });
-// });
-
-
-  
-
-app.get('/pings', async (req, res) => {
-  try {
-    const r = await query('SELECT id, message, created_at FROM pings ORDER BY created_at DESC LIMIT 10');
-    res.json(r.rows);
-  } catch (e) {
-    res.status(500).json({ error: 'Query failed', details: e.message });
+  // Include error details in development
+  if (process.env.NODE_ENV === 'development') {
+    errorResponse.error = error.message;
+    errorResponse.stack = error.stack;
   }
+
+  res.status(statusCode).json(errorResponse);
 });
 
-// GET recent pings
-app.get('/pings', async (req, res) => {
-  try {
-    const r = await query('SELECT id, message, created_at FROM pings ORDER BY created_at DESC LIMIT 10');
-    res.json(r.rows);
-  } catch (e) {
-    res.status(500).json({ error: 'Query failed', details: e.message });
-  }
-});
-
-// POST new ping
-app.post('/pings', async (req, res) => {
-  try {
-    const { message } = req.body;
-    if (!message) {
-      return res.status(400).json({ error: 'Message is required' });
-    }
-
-    const sql = 'INSERT INTO pings (message) VALUES ($1) RETURNING id, message, created_at';
-    const result = await query(sql, [message]);
-
-    res.status(201).json(result.rows[0]);
-  } catch (e) {
-    res.status(500).json({ error: 'Insert failed', details: e.message });
-  }
-});
-
+// Start server
 app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
+  console.log(`✅ Server running on port ${port}`);
+  console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`📅 Server time: ${new Date().toISOString()}`);
+  console.log('\n📋 Available Endpoints:');
+  console.log('   GET  /                 - System information');
+  console.log('   POST /auth/login       - User authentication');
+  console.log('   POST /sessions         - Create session (Admin only)');
+  console.log('   POST /sessions/:id/spend - Spend from session (Trainer only)');
+  console.log('   GET  /sessions/:id/transactions - Get session transactions');
+  console.log('   POST /sessions/:id/close - Close session (Admin only)');
+  console.log('   GET  /admin/ledger     - View all transactions (Admin only)');
+  console.log('   GET  /admin/summary    - System summary (Admin only)');
+  console.log('   GET  /api/vendors      - Manage vendors (Admin only)');
+  console.log('   GET  /db/health        - Health check');
+  console.log('\n👤 Default Users:');
+  console.log('   Admin:  admin@example.com / admin123');
+  console.log('   Trainer: trainer@example.com / trainer123');
 });
-
-
